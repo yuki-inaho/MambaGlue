@@ -161,5 +161,10 @@ def match_pair(
     matches01 = matcher({"image0": feats0, "image1": feats1})
     data = [feats0, feats1, matches01]
     # remove batch dim and move to target device
-    feats0, feats1, matches01 = [batch_to_device(rbd(x), device) for x in data]
+    # Results are often consumed immediately by NumPy/OpenCV visualization.
+    # A non-blocking CUDA-to-CPU copy can expose uninitialized or stale values
+    # at that point, so complete this transfer before returning.
+    feats0, feats1, matches01 = [
+        batch_to_device(rbd(x), device, non_blocking=False) for x in data
+    ]
     return feats0, feats1, matches01

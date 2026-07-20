@@ -105,6 +105,20 @@ indices exactly, and compares matching scores against PyTorch with a
 GPU-oriented floating-point tolerance. Use `--num-keypoints0` and
 `--num-keypoints1` to export asymmetric fixed sizes.
 
+### Interactive Gradio demo
+
+The local demo follows the two-upload, side-by-side match visualization style
+of the [LightGlue Space](https://huggingface.co/spaces/ETH-CVG/LightGlue). It
+downloads the released MambaGlue and SuperPoint weights on its first run.
+
+```bash
+uv sync --extra demo
+uv run mambaglue-demo
+```
+
+Open the local URL printed by Gradio, upload two views of a scene, then choose
+the feature count, resize limit, and number of colored matches to display.
+
 
 ## :zap: Quickstart
 The inference API mirrors LightGlue's, so existing LightGlue pipelines drop in with a one-line swap of the matcher.

@@ -54,6 +54,7 @@ Paper = "https://arxiv.org/abs/2502.00462"
 
 [project.optional-dependencies]
 dev = ["black==23.12.1", "flake8", "isort"]
+demo = ["gradio>=5,<6"]
 onnx = ["onnx>=1.16", "onnxruntime-gpu==1.22.0"]
 # Training reproduction extras. `gluefactory` itself is not installable from
 # PyPI; install it separately (editable from a local clone or directly from
@@ -63,6 +64,7 @@ train = ["h5py", "tensorboard", "pytlsd"]
 [project.scripts]
 mambaglue-smoke = "mambaglue.smoke:main"
 mambaglue-export-onnx = "mambaglue.onnx_export:main"
+mambaglue-demo = "mambaglue.gradio_app:main"
 
 [build-system]
 requires = ["setuptools>=68"]
