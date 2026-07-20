@@ -85,6 +85,26 @@ uv run mambaglue-smoke
 For a fast health check it limits SuperPoint to 256 keypoints and resizes each
 image to 320 pixels. Increase `--max-keypoints` for a heavier inference run.
 
+### Fixed-keypoint ONNX export
+
+Install the ONNX and GPU runtime extra, then export the released SuperPoint
+matcher. The exported graph receives fixed-length keypoint/descriptor tensors;
+only its batch axis is dynamic. `valid0` and `valid1` mark real points, so pad
+only the tail of each tensor and set the corresponding mask values to `false`.
+
+```bash
+uv sync --extra onnx
+uv run mambaglue-export-onnx \
+  --num-keypoints 32 \
+  --output outputs/mambaglue_superpoint_k32.onnx \
+  --verify
+```
+
+`--verify` requires ONNX Runtime's CUDA execution provider, checks all match
+indices exactly, and compares matching scores against PyTorch with a
+GPU-oriented floating-point tolerance. Use `--num-keypoints0` and
+`--num-keypoints1` to export asymmetric fixed sizes.
+
 
 ## :zap: Quickstart
 The inference API mirrors LightGlue's, so existing LightGlue pipelines drop in with a one-line swap of the matcher.

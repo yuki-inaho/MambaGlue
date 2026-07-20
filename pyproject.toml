@@ -54,6 +54,7 @@ Paper = "https://arxiv.org/abs/2502.00462"
 
 [project.optional-dependencies]
 dev = ["black==23.12.1", "flake8", "isort"]
+onnx = ["onnx>=1.16", "onnxruntime-gpu==1.22.0"]
 # Training reproduction extras. `gluefactory` itself is not installable from
 # PyPI; install it separately (editable from a local clone or directly from
 # https://github.com/cvg/glue-factory). See mambaglue/training/README.md.
@@ -61,6 +62,7 @@ train = ["h5py", "tensorboard", "pytlsd"]
 
 [project.scripts]
 mambaglue-smoke = "mambaglue.smoke:main"
+mambaglue-export-onnx = "mambaglue.onnx_export:main"
 
 [build-system]
 requires = ["setuptools>=68"]

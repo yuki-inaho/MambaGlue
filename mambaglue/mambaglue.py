@@ -11,63 +11,7 @@ from torch import nn
 from einops import rearrange, repeat
 import math
 
-try:
-    from mamba_ssm.ops.selective_scan_interface import selective_scan_fn
-except ModuleNotFoundError:
-    def selective_scan_fn(
-        u: torch.Tensor,
-        delta: torch.Tensor,
-        A: torch.Tensor,
-        B: torch.Tensor,
-        C: torch.Tensor,
-        D: Optional[torch.Tensor] = None,
-        z: Optional[torch.Tensor] = None,
-        delta_bias: Optional[torch.Tensor] = None,
-        delta_softplus: bool = False,
-        return_last_state: bool = False,
-    ):
-        """PyTorch fallback for :func:`mamba_ssm.selective_scan_fn`.
-
-        The published model only needs selective scan.  Keeping this reference
-        implementation here makes ``uv sync`` reproducible on CUDA hosts that
-        have an NVIDIA driver but no system CUDA compiler.  If ``mamba-ssm`` is
-        installed separately, its accelerated kernel is used automatically.
-        """
-        input_dtype = u.dtype
-        u, delta = u.float(), delta.float()
-        A, B, C = A.float(), B.float(), C.float()
-        if delta_bias is not None:
-            delta = delta + delta_bias.float().unsqueeze(-1)
-        if delta_softplus:
-            delta = F.softplus(delta)
-
-        batch, channels, length = u.shape
-        if B.ndim != 3 or C.ndim != 3:
-            raise ValueError("The MambaGlue fallback expects B and C with shape (B, N, L).")
-        if B.shape != (batch, A.shape[-1], length) or C.shape != B.shape:
-            raise ValueError("Invalid selective-scan parameter shapes.")
-
-        state = u.new_zeros((batch, channels, A.shape[-1]), dtype=torch.float32)
-        D = None if D is None else D.float().view(1, channels)
-        outputs = []
-        for index in range(length):
-            delta_t = delta[:, :, index]
-            state = (
-                torch.exp(delta_t.unsqueeze(-1) * A.unsqueeze(0)) * state
-                + delta_t.unsqueeze(-1)
-                * B[:, :, index].unsqueeze(1)
-                * u[:, :, index].unsqueeze(-1)
-            )
-            output = torch.einsum("bdn,bn->bd", state, C[:, :, index])
-            if D is not None:
-                output = output + u[:, :, index] * D
-            outputs.append(output)
-
-        output = torch.stack(outputs, dim=-1)
-        if z is not None:
-            output = output * F.silu(z.float())
-        output = output.to(dtype=input_dtype)
-        return (output, state) if return_last_state else output
+from .selective_scan import selective_scan
 
 try:
     from flash_attn.modules.mha import FlashCrossAttention
@@ -87,12 +31,12 @@ def normalize_keypoints(
     kpts: torch.Tensor, size: Optional[torch.Tensor] = None
 ) -> torch.Tensor:
     if size is None:
-        size = 1 + kpts.max(-2).values - kpts.min(-2).values
+        size = 1 + kpts.max(1).values - kpts.min(1).values
     elif not isinstance(size, torch.Tensor):
         size = torch.tensor(size, device=kpts.device, dtype=kpts.dtype)
     size = size.to(kpts)
     shift = size / 2
-    scale = size.max(-1).values / 2
+    scale = size.max(1).values / 2
     kpts = (kpts - shift[..., None, :]) / scale[..., None, None]
     return kpts
 
@@ -110,9 +54,9 @@ def pad_to_length(x: torch.Tensor, length: int) -> Tuple[torch.Tensor]:
 
 
 def rotate_half(x: torch.Tensor) -> torch.Tensor:
-    x = x.unflatten(-1, (-1, 2))
-    x1, x2 = x.unbind(dim=-1)
-    return torch.stack((-x2, x1), dim=-1).flatten(start_dim=-2)
+    x = x.unflatten(3, (-1, 2))
+    x1, x2 = x.unbind(dim=4)
+    return torch.stack((-x2, x1), dim=4).flatten(start_dim=3)
 
 
 def apply_cached_rotary_emb(freqs: torch.Tensor, t: torch.Tensor) -> torch.Tensor:
@@ -131,8 +75,8 @@ class LearnableFourierPositionalEncoding(nn.Module):
         """encode position vector"""
         projected = self.Wr(x)
         cosines, sines = torch.cos(projected), torch.sin(projected)
-        emb = torch.stack([cosines, sines], 0).unsqueeze(-3)
-        return emb.repeat_interleave(2, dim=-1)
+        emb = torch.stack([cosines, sines], 0).unsqueeze(2)
+        return emb.repeat_interleave(2, dim=4)
 
 
 class TokenConfidence(nn.Module):
@@ -170,7 +114,7 @@ class Attention(nn.Module):
             torch.backends.cuda.enable_flash_sdp(allow_flash)
 
     def forward(self, q, k, v, mask: Optional[torch.Tensor] = None) -> torch.Tensor:
-        if q.shape[-2] == 0 or k.shape[-2] == 0:
+        if not torch.onnx.is_in_onnx_export() and (q.shape[-2] == 0 or k.shape[-2] == 0):
             return q.new_zeros((*q.shape[:-1], v.shape[-1]))
         if self.enable_flash and q.device.type == "cuda":
             # use torch 2.0 scaled_dot_product_attention with flash
@@ -183,7 +127,7 @@ class Attention(nn.Module):
                 q, k, v = [x.transpose(-2, -3).contiguous() for x in [q, k, v]]
                 m = self.flash_(q.half(), torch.stack([k, v], 2).half())
                 return m.transpose(-2, -3).to(q.dtype).clone()
-        elif self.has_sdp:
+        elif self.has_sdp and not torch.onnx.is_in_onnx_export():
             args = [x.contiguous() for x in [q, k, v]]
             v = F.scaled_dot_product_attention(*args, attn_mask=mask)
             return v if mask is None else v.nan_to_num()
@@ -192,7 +136,9 @@ class Attention(nn.Module):
             sim = torch.einsum("...id,...jd->...ij", q, k) * s
             if mask is not None:
                 sim.masked_fill(~mask, -float("inf"))
-            attn = F.softmax(sim, -1)
+            attn = F.softmax(sim, 3)
+            if mask is not None:
+                attn = attn.nan_to_num()
             return torch.einsum("...ij,...jd->...id", attn, v)
 
 
@@ -215,6 +161,7 @@ class MambaMixer(nn.Module):
         layer_idx=None,
         device=None,
         dtype=None,
+        scan_backend="auto",
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
@@ -226,6 +173,7 @@ class MambaMixer(nn.Module):
         self.dt_rank = math.ceil(self.d_model / 16) if dt_rank == "auto" else dt_rank
         self.use_fast_path = use_fast_path
         self.layer_idx = layer_idx
+        self.scan_backend = scan_backend
         self.in_proj = nn.Linear(
             self.d_model, self.d_inner, bias=bias, **factory_kwargs
         )
@@ -331,17 +279,15 @@ class MambaMixer(nn.Module):
         C = rearrange(
             C, "(b l) dstate -> b dstate l", l=seqlen
         ).contiguous()  # [B, dt_state, L]
-        y = selective_scan_fn(
+        y = selective_scan(
             x,
             dt,
             A,
             B,
             C,
             self.D.float(),
-            z=None,
-            delta_bias=self.dt_proj.bias.float(),
-            delta_softplus=True,
-            return_last_state=None,
+            self.dt_proj.bias.float(),
+            backend=self.scan_backend,
         )  # [B, D, L]
 
         y = rearrange(y, "b d l -> b l d")  # [B, L, D]
@@ -354,7 +300,12 @@ class MambaMixer(nn.Module):
 
 class MambaAttentionMixer(nn.Module):
     def __init__(
-        self, embed_dim: int, num_heads: int, flash: bool = False, bias: bool = True
+        self,
+        embed_dim: int,
+        num_heads: int,
+        flash: bool = False,
+        bias: bool = True,
+        scan_backend: str = "auto",
     ) -> None:
         super().__init__()
         self.embed_dim = embed_dim
@@ -372,7 +323,7 @@ class MambaAttentionMixer(nn.Module):
         )
 
         # Mamba
-        self.mamba_mixer = MambaMixer(self.embed_dim)
+        self.mamba_mixer = MambaMixer(self.embed_dim, scan_backend=scan_backend)
 
     def forward(
         self,
@@ -453,9 +404,11 @@ class CrossBlock(nn.Module):
 
 
 class TransformerMambaLayer(nn.Module):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, scan_backend: str = "auto", **kwargs):
         super().__init__()
-        self.mamba_selfattn_mixer = MambaAttentionMixer(*args, **kwargs)
+        self.mamba_selfattn_mixer = MambaAttentionMixer(
+            *args, scan_backend=scan_backend, **kwargs
+        )
         self.cross_attn = CrossBlock(*args, **kwargs)
 
     def forward(
@@ -555,6 +508,9 @@ class MambaGlue(nn.Module):
         "width_confidence": -1,  # point pruning, disable with -1
         "filter_threshold": 0.01,  # match threshold
         "weights": None,
+        "checkpoint": None,
+        "strict": False,
+        "scan_backend": "auto",
     }
 
     # Point pruning involves an overhead (gather).
@@ -622,7 +578,12 @@ class MambaGlue(nn.Module):
         h, n, d = conf.num_heads, conf.n_layers, conf.descriptor_dim
 
         self.transformermambas = nn.ModuleList(
-            [TransformerMambaLayer(d, h, conf.flash) for _ in range(n)]
+            [
+                TransformerMambaLayer(
+                    d, h, conf.flash, scan_backend=conf.scan_backend
+                )
+                for _ in range(n)
+            ]
         )
 
         self.log_assignment = nn.ModuleList([MatchAssignment(d) for _ in range(n)])
@@ -637,7 +598,19 @@ class MambaGlue(nn.Module):
         )
 
         state_dict = None
-        if features is not None:
+        if conf.checkpoint is not None:
+            checkpoint = torch.load(
+                str(Path(conf.checkpoint).expanduser()),
+                map_location="cpu",
+                weights_only=False,
+            )
+            if isinstance(checkpoint, dict):
+                state_dict = checkpoint.get(
+                    "model", checkpoint.get("state_dict", checkpoint.get("matcher", checkpoint))
+                )
+            else:
+                state_dict = checkpoint
+        elif features is not None:
             filename = f"{conf.weights}_{self.version}.tar"
             checkpoint = torch.hub.load_state_dict_from_url(
                 self.url.format(self.version, features),
@@ -657,6 +630,8 @@ class MambaGlue(nn.Module):
             # by ``SuperPoint`` above and must not be applied to this matcher.
             normalized_state_dict = {}
             for key, value in state_dict.items():
+                while key.startswith(("module.", "model.")):
+                    key = key.split(".", 1)[1]
                 if key.startswith("extractor."):
                     continue
                 key = key.removeprefix("matcher.")
@@ -666,7 +641,7 @@ class MambaGlue(nn.Module):
                 )
                 normalized_state_dict[key] = value
             state_dict = normalized_state_dict
-            self.load_state_dict(state_dict, strict=False)
+            self.load_state_dict(state_dict, strict=conf.strict)
 
         # static lengths MambaGlue is compiled for (only used with torch.compile)
         self.static_lengths = None
