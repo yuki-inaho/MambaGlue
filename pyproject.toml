@@ -8,7 +8,7 @@ authors = [
     {name = "Hyun Myung"},
 ]
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.13"
 license = {file = "LICENSE"}
 keywords = [
     "feature-matching",
@@ -33,7 +33,17 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Scientific/Engineering :: Image Recognition",
 ]
-dynamic = ["dependencies"]
+dependencies = [
+    "einops>=0.8,<1",
+    "kornia>=0.6.11,<1",
+    "matplotlib>=3.8,<4",
+    "numpy>=1.26,<3",
+    "omegaconf>=2.3,<3",
+    "opencv-python>=4.10,<5",
+    "requests>=2.31,<3",
+    "torch==2.6.0",
+    "torchvision==0.21.0",
+]
 
 [project.urls]
 Repository = "https://github.com/url-kaist/MambaGlue"
@@ -49,6 +59,13 @@ dev = ["black==23.12.1", "flake8", "isort"]
 # https://github.com/cvg/glue-factory). See mambaglue/training/README.md.
 train = ["h5py", "tensorboard", "pytlsd"]
 
+[project.scripts]
+mambaglue-smoke = "mambaglue.smoke:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [tool.setuptools]
 packages = ["mambaglue", "mambaglue.training"]
 include-package-data = true
@@ -56,8 +73,14 @@ include-package-data = true
 [tool.setuptools.package-data]
 "mambaglue.training" = ["configs/*.yaml", "run.sh"]
 
-[tool.setuptools.dynamic]
-dependencies = {file = ["requirements.txt"]}
+[tool.uv.sources]
+torch = { index = "pytorch-cu124", marker = "sys_platform == 'linux'" }
+torchvision = { index = "pytorch-cu124", marker = "sys_platform == 'linux'" }
+
+[[tool.uv.index]]
+name = "pytorch-cu124"
+url = "https://download.pytorch.org/whl/cu124"
+explicit = true
 
 [tool.isort]
 profile = "black"

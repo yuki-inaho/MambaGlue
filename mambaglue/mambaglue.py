@@ -9,10 +9,65 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from einops import rearrange, repeat
-from mamba_ssm.ops.selective_scan_interface import selective_scan_fn
 import math
-import requests
-from torch.hub import download_url_to_file
+
+try:
+    from mamba_ssm.ops.selective_scan_interface import selective_scan_fn
+except ModuleNotFoundError:
+    def selective_scan_fn(
+        u: torch.Tensor,
+        delta: torch.Tensor,
+        A: torch.Tensor,
+        B: torch.Tensor,
+        C: torch.Tensor,
+        D: Optional[torch.Tensor] = None,
+        z: Optional[torch.Tensor] = None,
+        delta_bias: Optional[torch.Tensor] = None,
+        delta_softplus: bool = False,
+        return_last_state: bool = False,
+    ):
+        """PyTorch fallback for :func:`mamba_ssm.selective_scan_fn`.
+
+        The published model only needs selective scan.  Keeping this reference
+        implementation here makes ``uv sync`` reproducible on CUDA hosts that
+        have an NVIDIA driver but no system CUDA compiler.  If ``mamba-ssm`` is
+        installed separately, its accelerated kernel is used automatically.
+        """
+        input_dtype = u.dtype
+        u, delta = u.float(), delta.float()
+        A, B, C = A.float(), B.float(), C.float()
+        if delta_bias is not None:
+            delta = delta + delta_bias.float().unsqueeze(-1)
+        if delta_softplus:
+            delta = F.softplus(delta)
+
+        batch, channels, length = u.shape
+        if B.ndim != 3 or C.ndim != 3:
+            raise ValueError("The MambaGlue fallback expects B and C with shape (B, N, L).")
+        if B.shape != (batch, A.shape[-1], length) or C.shape != B.shape:
+            raise ValueError("Invalid selective-scan parameter shapes.")
+
+        state = u.new_zeros((batch, channels, A.shape[-1]), dtype=torch.float32)
+        D = None if D is None else D.float().view(1, channels)
+        outputs = []
+        for index in range(length):
+            delta_t = delta[:, :, index]
+            state = (
+                torch.exp(delta_t.unsqueeze(-1) * A.unsqueeze(0)) * state
+                + delta_t.unsqueeze(-1)
+                * B[:, :, index].unsqueeze(1)
+                * u[:, :, index].unsqueeze(-1)
+            )
+            output = torch.einsum("bdn,bn->bd", state, C[:, :, index])
+            if D is not None:
+                output = output + u[:, :, index] * D
+            outputs.append(output)
+
+        output = torch.stack(outputs, dim=-1)
+        if z is not None:
+            output = output * F.silu(z.float())
+        output = output.to(dtype=input_dtype)
+        return (output, state) if return_last_state else output
 
 try:
     from flash_attn.modules.mha import FlashCrossAttention
@@ -27,7 +82,7 @@ else:
 torch.backends.cudnn.deterministic = True
 
 
-@torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
+@torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
 def normalize_keypoints(
     kpts: torch.Tensor, size: Optional[torch.Tensor] = None
 ) -> torch.Tensor:
@@ -85,9 +140,7 @@ class TokenConfidence(nn.Module):
         super().__init__()
         self.token = nn.Sequential(
             nn.Linear(dim, dim // 2),
-            nn.ReLU(),
             nn.Linear(dim // 2, dim // 4),
-            nn.ReLU(),
             nn.Linear(dim // 4, 1),
             nn.Sigmoid(),
         )
@@ -516,8 +569,7 @@ class MambaGlue(nn.Module):
     required_data_keys = ["image0", "image1"]
 
     version = "v0.1"
-    url = "https://github.com/url-kaist/MambaGlue/releases/download/{}/{}_mambaglue.tar"  # (will be) releases/v0.1/superpoint_mambaglue.tar
-    # Train your own for now and use it on local
+    url = "https://github.com/url-kaist/MambaGlue/releases/download/{}/{}_mambaglue.tar"
 
     features = {
         "superpoint": {
@@ -586,48 +638,34 @@ class MambaGlue(nn.Module):
 
         state_dict = None
         if features is not None:
-            # When using released weight
-            # fname = f"{conf.weights}_{self.version.replace('.', '-')}.tar"
-            # state_dict = torch.hub.load_state_dict_from_url(
-            #     self.url.format(self.version, features), file_name=fname
-            # )
-
-            ##### LOCAL weight
-            local_path = Path(
-                "checkpoint_best.tar"
-            )  # local path for your own weight (.tar or .pth)
-            print(f"Attempting to load from: {local_path}")
-            if not local_path.exists():
-                raise FileNotFoundError(
-                    f"Weights file not found at {local_path}. Please download it manually."
-                )
-
-            checkpoint = torch.load(str(local_path), map_location="cpu")
-
-            # Extract only the model weights from the checkpoint
-            if "model" in checkpoint:
-                state_dict = checkpoint["model"]
-                print("Successfully extracted model weights from the checkpoint.")
-            else:
-                raise KeyError(
-                    "The checkpoint does not contain 'model' key. Available keys are: ",
-                    checkpoint.keys(),
-                )
-
-            # Load the state dict into your model
-            self.load_state_dict(state_dict, strict=False)
+            filename = f"{conf.weights}_{self.version}.tar"
+            checkpoint = torch.hub.load_state_dict_from_url(
+                self.url.format(self.version, features),
+                map_location="cpu",
+                file_name=filename,
+                check_hash=False,
+            )
+            state_dict = checkpoint.get("model", checkpoint)
         elif conf.weights is not None:
             path = Path(__file__).parent
             path = path / "weights/{}.pth".format(self.conf.weights)
             state_dict = torch.load(str(path), map_location="cpu")
 
-        if state_dict:
-            # rename mismatched state dict entries
-            for i in range(self.conf.n_layers):
-                pattern = "matcher.", ""
-                state_dict = {k.replace(*pattern): v for k, v in state_dict.items()}
-                pattern = "extractor", ""
-                state_dict = {k.replace(*pattern): v for k, v in state_dict.items()}
+        if state_dict is not None:
+            # The v0.1 release predates a module-name cleanup.  Its checkpoint
+            # also embeds the SuperPoint extractor, which is loaded separately
+            # by ``SuperPoint`` above and must not be applied to this matcher.
+            normalized_state_dict = {}
+            for key, value in state_dict.items():
+                if key.startswith("extractor."):
+                    continue
+                key = key.removeprefix("matcher.")
+                key = key.replace("transformers.", "transformermambas.")
+                key = key.replace(
+                    ".mamba_self_attn.", ".mamba_selfattn_mixer."
+                )
+                normalized_state_dict[key] = value
+            state_dict = normalized_state_dict
             self.load_state_dict(state_dict, strict=False)
 
         # static lengths MambaGlue is compiled for (only used with torch.compile)

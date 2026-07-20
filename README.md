@@ -57,22 +57,33 @@ SfM and visual-localization integration is planned for a separate `hloc` branch,
 
 
 ## :keyboard: Install
-Mamba's selective-scan kernels must be built first, then install MambaGlue itself:
+The project is managed with [uv](https://docs.astral.sh/uv/). On Linux, the
+lockfile selects the CUDA 12.4 PyTorch wheels, which work with the NVIDIA driver
+provided by this environment. Python 3.11 is selected automatically from
+`.python-version`.
 
 ```bash
-# 1) Install Mamba (state-spaces/mamba)
-git clone https://github.com/state-spaces/mamba && cd mamba
-pip install .
-cd ..
-
-# 2) Install MambaGlue
-git clone https://github.com/url-kaist/MambaGlue.git && cd MambaGlue
-python -m pip install -e .
+uv sync
 ```
 
-To skip CUDA/toolchain headaches, start from a known-good environment:
-- [Our Docker image (`rkh137/glue`)](https://hub.docker.com/r/rkh137/glue)
-- [PyTorch official image (`pytorch/pytorch:2.1.0-cuda11.8-cudnn8-devel`)](https://hub.docker.com/layers/pytorch/pytorch/2.1.0-cuda11.8-cudnn8-devel/images/sha256-558b78b9a624969d54af2f13bf03fbad27907dbb6f09973ef4415d6ea24c80d9)
+`mamba-ssm` is optional: MambaGlue includes an equivalent PyTorch selective-scan
+fallback so `uv sync` does not require a system CUDA compiler. If an accelerated
+`mamba-ssm` build is installed later, it is detected automatically.
+
+### Smoke test with released weights
+
+This command downloads the released MambaGlue SuperPoint checkpoint, the
+SuperPoint checkpoint, and LightGlue's public Sacré-Cœur sample pair. The two
+input JPEGs are checksum-verified and stored under `data/smoke/`; checkpoints
+are cached under `.cache/torch/`. A result summary is written to
+`outputs/smoke_test.json`.
+
+```bash
+uv run mambaglue-smoke
+```
+
+For a fast health check it limits SuperPoint to 256 keypoints and resizes each
+image to 320 pixels. Increase `--max-keypoints` for a heavier inference run.
 
 
 ## :zap: Quickstart

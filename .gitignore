@@ -1,5 +1,7 @@
 /data/
 /outputs/
+/weights/
+/.cache/
 /mambaglue/weights/
 *-checkpoint.ipynb
 *.pth
