@@ -2,8 +2,6 @@ import warnings
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Callable, List, Optional, Tuple
-from omegaconf import OmegaConf
-
 import numpy as np
 import torch
 import torch.nn.functional as F

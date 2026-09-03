@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import List
 
 import torch
@@ -72,13 +73,40 @@ def selective_scan(
         raise ValueError(f"Unknown selective-scan backend: {backend!r}")
 
     exporting = torch.onnx.is_in_onnx_export()
+    # Released mamba-ssm wheels generally target up to Ampere/Hopper and may
+    # import successfully while lacking an sm_120 kernel.  On Blackwell,
+    # prefer the numerically equivalent PyTorch implementation unless the
+    # user explicitly opts in after building a matching extension.
+    blackwell = False
+    if u.device.type == "cuda":
+        try:
+            capability = torch.cuda.get_device_capability(u.device)
+            blackwell = capability >= (12, 0)
+        except RuntimeError:
+            blackwell = False
+    allow_blackwell_mamba = os.environ.get("MAMBAGLUE_ALLOW_BLACKWELL_MAMBA", "") in {
+        "1",
+        "true",
+        "TRUE",
+        "yes",
+        "YES",
+    }
     can_use_mamba = (
         _mamba_selective_scan_fn is not None
         and u.device.type == "cuda"
         and not exporting
+        and (not blackwell or allow_blackwell_mamba)
     )
     if backend == "mamba" and not can_use_mamba:
-        reason = "ONNX export is active" if exporting else "CUDA mamba_ssm is unavailable"
+        if exporting:
+            reason = "ONNX export is active"
+        elif blackwell and not allow_blackwell_mamba:
+            reason = (
+                "Blackwell sm_120 uses the portable backend by default; set "
+                "MAMBAGLUE_ALLOW_BLACKWELL_MAMBA=1 only for a matching build"
+            )
+        else:
+            reason = "CUDA mamba_ssm is unavailable"
         raise RuntimeError(f"The mamba selective-scan backend cannot be used: {reason}.")
     if backend in {"auto", "mamba"} and can_use_mamba:
         assert _mamba_selective_scan_fn is not None

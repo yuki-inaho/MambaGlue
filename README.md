@@ -57,10 +57,10 @@ SfM and visual-localization integration is planned for a separate `hloc` branch,
 
 
 ## :keyboard: Install
-The project is managed with [uv](https://docs.astral.sh/uv/). On Linux, the
-lockfile selects the CUDA 12.4 PyTorch wheels, which work with the NVIDIA driver
-provided by this environment. Python 3.11 is selected automatically from
-`.python-version`.
+The project is managed with [uv](https://docs.astral.sh/uv/). On the
+`blackwell` branch, the lockfile selects the CUDA 13.0 PyTorch wheels
+(PyTorch 2.12.0 / torchvision 0.27.0), which include kernels for Blackwell
+(sm_120). Python 3.11 is selected automatically from `.python-version`.
 
 ```bash
 uv sync
@@ -68,7 +68,10 @@ uv sync
 
 `mamba-ssm` is optional: MambaGlue includes an equivalent PyTorch selective-scan
 fallback so `uv sync` does not require a system CUDA compiler. If an accelerated
-`mamba-ssm` build is installed later, it is detected automatically.
+`mamba-ssm` build is installed later, it is detected automatically on supported
+architectures. On Blackwell (sm_120), the portable backend is selected by
+default because released `mamba-ssm` binaries may not contain an sm_120 kernel;
+set `MAMBAGLUE_ALLOW_BLACKWELL_MAMBA=1` only after installing a matching build.
 
 ### Smoke test with released weights
 

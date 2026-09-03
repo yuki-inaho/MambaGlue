@@ -41,8 +41,10 @@ dependencies = [
     "omegaconf>=2.3,<3",
     "opencv-python>=4.10,<5",
     "requests>=2.31,<3",
-    "torch==2.6.0",
-    "torchvision==0.21.0",
+    # Blackwell (sm_120) requires CUDA 13.0 wheels; the original cu124
+    # binaries do not contain a kernel image for this GPU.
+    "torch==2.12.0",
+    "torchvision==0.27.0",
 ]
 
 [project.urls]
@@ -78,12 +80,12 @@ include-package-data = true
 "mambaglue.training" = ["configs/*.yaml", "run.sh"]
 
 [tool.uv.sources]
-torch = { index = "pytorch-cu124", marker = "sys_platform == 'linux'" }
-torchvision = { index = "pytorch-cu124", marker = "sys_platform == 'linux'" }
+torch = { index = "pytorch-cu130", marker = "sys_platform == 'linux'" }
+torchvision = { index = "pytorch-cu130", marker = "sys_platform == 'linux'" }
 
 [[tool.uv.index]]
-name = "pytorch-cu124"
-url = "https://download.pytorch.org/whl/cu124"
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [tool.isort]
