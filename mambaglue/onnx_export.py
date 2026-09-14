@@ -1063,6 +1063,7 @@ def verify_matcher_onnx(
     *,
     rtol: float = 1.0e-1,
     atol: float = 1.0e-2,
+    provider: str = "cuda",
 ) -> dict[str, float]:
     """Compare PyTorch and CUDA ONNX Runtime outputs for the export sample.
 
@@ -1089,8 +1090,17 @@ def verify_matcher_onnx(
 
     with torch.inference_mode():
         torch_outputs = wrapper(*inputs)
-    if "CUDAExecutionProvider" not in ort.get_available_providers():
-        raise RuntimeError("onnxruntime-gpu did not expose CUDAExecutionProvider.")
+    available = ort.get_available_providers()
+    if provider == "cuda":
+        if "CUDAExecutionProvider" not in available:
+            raise RuntimeError("onnxruntime-gpu did not expose CUDAExecutionProvider.")
+        providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
+    elif provider == "cpu":
+        if "CPUExecutionProvider" not in available:
+            raise RuntimeError("onnxruntime did not expose CPUExecutionProvider.")
+        providers = ["CPUExecutionProvider"]
+    else:
+        raise ValueError(f"provider must be 'cuda' or 'cpu', got {provider!r}")
     session_options = ort.SessionOptions()
     # Loop-heavy graphs can spend substantially longer in global graph
     # optimization than in inference. Verification only needs semantic parity.
@@ -1100,12 +1110,11 @@ def verify_matcher_onnx(
     session = ort.InferenceSession(
         str(Path(onnx_path).resolve()),
         sess_options=session_options,
-        providers=["CUDAExecutionProvider", "CPUExecutionProvider"],
+        providers=providers,
     )
-    if session.get_providers()[0] != "CUDAExecutionProvider":
+    if session.get_providers()[0] != providers[0]:
         raise RuntimeError(
-            "ONNX Runtime did not select CUDAExecutionProvider: "
-            f"{session.get_providers()}"
+            f"ONNX Runtime did not select {providers[0]}: {session.get_providers()}"
         )
     ort_inputs = {
         name: tensor.detach().cpu().numpy()
@@ -1175,6 +1184,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Run an ONNX Runtime numerical comparison after export.",
     )
     parser.add_argument(
+        "--verify-provider",
+        choices=["cuda", "cpu"],
+        default="cuda",
+        help=(
+            "Execution provider for --verify. 'cuda' requires onnxruntime-gpu; "
+            "'cpu' uses the CPU provider explicitly (no implicit fallback)."
+        ),
+    )
+    parser.add_argument(
         "--fixed-batch",
         action="store_true",
         help="Keep the batch axis fixed instead of dynamic.",
@@ -1225,9 +1243,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"input descriptor dim={matcher.conf.input_dim}"
     )
     if args.verify:
-        report = verify_matcher_onnx(matcher, output, inputs)
+        report = verify_matcher_onnx(
+            matcher, output, inputs, provider=args.verify_provider
+        )
         formatted = ", ".join(f"{key}={value:.3e}" for key, value in report.items())
-        print(f"ONNX Runtime CUDA verification passed: {formatted}")
+        print(f"ONNX Runtime verification passed: {formatted}")
     return 0
 
 
