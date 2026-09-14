@@ -95,6 +95,70 @@ def sample_descriptors(keypoints, descriptors, s: int = 8):
     return descriptors
 
 
+SUPERPOINT_WEIGHTS_URL = "https://github.com/cvg/LightGlue/releases/download/v0.1_arxiv/superpoint_v1.pth"  # noqa
+
+
+def build_superpoint_convs(
+    module: nn.Module, in_channels: int, descriptor_dim: int = 256
+) -> nn.Module:
+    """Attach the SuperPoint backbone convolutions to ``module`` in place."""
+    module.relu = nn.ReLU(inplace=True)
+    module.pool = nn.MaxPool2d(kernel_size=2, stride=2)
+    c1, c2, c3, c4, c5 = 64, 64, 128, 128, 256
+
+    module.conv1a = nn.Conv2d(in_channels, c1, kernel_size=3, stride=1, padding=1)
+    module.conv1b = nn.Conv2d(c1, c1, kernel_size=3, stride=1, padding=1)
+    module.conv2a = nn.Conv2d(c1, c2, kernel_size=3, stride=1, padding=1)
+    module.conv2b = nn.Conv2d(c2, c2, kernel_size=3, stride=1, padding=1)
+    module.conv3a = nn.Conv2d(c2, c3, kernel_size=3, stride=1, padding=1)
+    module.conv3b = nn.Conv2d(c3, c3, kernel_size=3, stride=1, padding=1)
+    module.conv4a = nn.Conv2d(c3, c4, kernel_size=3, stride=1, padding=1)
+    module.conv4b = nn.Conv2d(c4, c4, kernel_size=3, stride=1, padding=1)
+
+    module.convPa = nn.Conv2d(c4, c5, kernel_size=3, stride=1, padding=1)
+    module.convPb = nn.Conv2d(c5, 65, kernel_size=1, stride=1, padding=0)
+
+    module.convDa = nn.Conv2d(c4, c5, kernel_size=3, stride=1, padding=1)
+    module.convDb = nn.Conv2d(c5, descriptor_dim, kernel_size=1, stride=1, padding=0)
+    return module
+
+
+def expand_superpoint_state_dict(state_dict):
+    """Duplicate the 1-channel SuperPoint stem into 2 channels (depth = copy).
+
+    No implicit ``strict=False``: the returned dict is loaded strictly, so any
+    surprise key/shape change is surfaced instead of silently ignored.
+    """
+    if "conv1a.weight" not in state_dict:
+        raise KeyError("conv1a.weight is missing from the SuperPoint state dict")
+    weight = state_dict["conv1a.weight"]
+    if weight.dim() != 4 or weight.shape[1] != 1:
+        raise ValueError(
+            f"conv1a.weight must have shape (out, 1, k, k), got {tuple(weight.shape)}"
+        )
+    expanded = dict(state_dict)
+    expanded["conv1a.weight"] = torch.cat([weight, weight], dim=1).contiguous()
+    return expanded
+
+
+def init_rgbd_from_superpoint(module: "SuperPointRGBD") -> None:
+    """Replace a SuperPoint stem with a 2-channel stem (ch0 original, ch1 copy)."""
+    old = module.conv1a
+    new = nn.Conv2d(
+        2,
+        old.out_channels,
+        old.kernel_size,
+        old.stride,
+        old.padding,
+        bias=old.bias is not None,
+    )
+    with torch.no_grad():
+        new.weight.copy_(torch.cat([old.weight, old.weight], dim=1))
+        if old.bias is not None:
+            new.bias.copy_(old.bias)
+    module.conv1a = new
+
+
 class SuperPoint(Extractor):
     """SuperPoint Convolutional Detector and Descriptor
 
@@ -120,29 +184,8 @@ class SuperPoint(Extractor):
 
     def __init__(self, **conf):
         super().__init__(**conf)  # Update with default configuration.
-        self.relu = nn.ReLU(inplace=True)
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
-        c1, c2, c3, c4, c5 = 64, 64, 128, 128, 256
-
-        self.conv1a = nn.Conv2d(1, c1, kernel_size=3, stride=1, padding=1)
-        self.conv1b = nn.Conv2d(c1, c1, kernel_size=3, stride=1, padding=1)
-        self.conv2a = nn.Conv2d(c1, c2, kernel_size=3, stride=1, padding=1)
-        self.conv2b = nn.Conv2d(c2, c2, kernel_size=3, stride=1, padding=1)
-        self.conv3a = nn.Conv2d(c2, c3, kernel_size=3, stride=1, padding=1)
-        self.conv3b = nn.Conv2d(c3, c3, kernel_size=3, stride=1, padding=1)
-        self.conv4a = nn.Conv2d(c3, c4, kernel_size=3, stride=1, padding=1)
-        self.conv4b = nn.Conv2d(c4, c4, kernel_size=3, stride=1, padding=1)
-
-        self.convPa = nn.Conv2d(c4, c5, kernel_size=3, stride=1, padding=1)
-        self.convPb = nn.Conv2d(c5, 65, kernel_size=1, stride=1, padding=0)
-
-        self.convDa = nn.Conv2d(c4, c5, kernel_size=3, stride=1, padding=1)
-        self.convDb = nn.Conv2d(
-            c5, self.conf.descriptor_dim, kernel_size=1, stride=1, padding=0
-        )
-
-        url = "https://github.com/cvg/LightGlue/releases/download/v0.1_arxiv/superpoint_v1.pth"  # noqa
-        self.load_state_dict(torch.hub.load_state_dict_from_url(url))
+        build_superpoint_convs(self, 1, self.conf.descriptor_dim)
+        self.load_state_dict(torch.hub.load_state_dict_from_url(SUPERPOINT_WEIGHTS_URL))
 
         if self.conf.max_num_keypoints is not None and self.conf.max_num_keypoints <= 0:
             raise ValueError("max_num_keypoints must be positive or None")
@@ -225,3 +268,28 @@ class SuperPoint(Extractor):
             "keypoint_scores": torch.stack(scores, 0),
             "descriptors": torch.stack(descriptors, 0).transpose(-1, -2).contiguous(),
         }
+
+
+class SuperPointRGBD(SuperPoint):
+    """SuperPoint whose stem takes 2 channels: grayscale RGB and depth.
+
+    ``forward`` is inherited unchanged: it only converts 3-channel input to
+    grayscale, so a (B, 2, H, W) RGB-D tensor passes straight into the 2-channel
+    stem. Weights come from the released 1-channel SuperPoint checkpoint with
+    ``conv1a`` expanded (ch0 = original, ch1 = copy).
+    """
+
+    def __init__(self, *, source_state_dict=None, **conf):
+        # Skip ``SuperPoint.__init__``: it would build a 1-channel stem and load
+        # the 1-channel checkpoint before we could expand it.
+        Extractor.__init__(self, **conf)
+        build_superpoint_convs(self, 2, self.conf.descriptor_dim)
+
+        if self.conf.max_num_keypoints is not None and self.conf.max_num_keypoints <= 0:
+            raise ValueError("max_num_keypoints must be positive or None")
+
+        if source_state_dict is None:
+            source_state_dict = torch.hub.load_state_dict_from_url(
+                SUPERPOINT_WEIGHTS_URL
+            )
+        self.load_state_dict(expand_superpoint_state_dict(source_state_dict))

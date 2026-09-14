@@ -65,6 +65,7 @@ train = ["h5py", "tensorboard", "pytlsd"]
 
 [project.scripts]
 mambaglue-smoke = "mambaglue.smoke:main"
+mambaglue-rgbd-smoke = "mambaglue.rgbd_smoke:main"
 mambaglue-export-onnx = "mambaglue.onnx_export:main"
 mambaglue-demo = "mambaglue.gradio_app:main"
 

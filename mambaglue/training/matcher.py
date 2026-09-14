@@ -13,13 +13,15 @@ Reference for the contract this matcher implements:
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import torch
 import torch.utils.checkpoint
-from torch import nn
-
 from gluefactory.models.base_model import BaseModel
-from gluefactory.models.utils.losses import NLLLoss
-from gluefactory.models.utils.metrics import matcher_metrics
+from gluefactory.utils.losses import NLLLoss
+from gluefactory.utils.metrics import matcher_metrics
+from torch import nn
 
 from ..mambaglue import (
     LearnableFourierPositionalEncoding,
@@ -56,12 +58,10 @@ class TrainableTokenConfidence(TokenConfidence):
         logit1 = self._logits(desc1)
         la_now, la_final = la_now.detach(), la_final.detach()
         correct0 = (
-            la_final[:, :-1, :].max(-1).indices
-            == la_now[:, :-1, :].max(-1).indices
+            la_final[:, :-1, :].max(-1).indices == la_now[:, :-1, :].max(-1).indices
         )
         correct1 = (
-            la_final[:, :, :-1].max(-2).indices
-            == la_now[:, :, :-1].max(-2).indices
+            la_final[:, :, :-1].max(-2).indices == la_now[:, :, :-1].max(-2).indices
         )
         return (
             self.loss_fn(logit0, correct0.float()).mean(-1)
@@ -102,9 +102,7 @@ class MambaGlueMatcher(BaseModel):
 
     def _init(self, conf):
         if conf.input_dim != conf.descriptor_dim:
-            self.input_proj = nn.Linear(
-                conf.input_dim, conf.descriptor_dim, bias=True
-            )
+            self.input_proj = nn.Linear(conf.input_dim, conf.descriptor_dim, bias=True)
         else:
             self.input_proj = nn.Identity()
 
@@ -123,6 +121,54 @@ class MambaGlueMatcher(BaseModel):
         )
 
         self.loss_fn = NLLLoss(conf.loss)
+
+        if conf.weights is not None:
+            self._load_pretrained_weights(conf.weights)
+
+    def _load_pretrained_weights(self, weights: str) -> None:
+        """Load released MambaGlue weights; fail closed on any key mismatch.
+
+        The v0.1 release checkpoints use legacy module names and embed the
+        SuperPoint extractor, so the same normalization as the inference path is
+        applied before a strict key/shape check.
+        """
+        source = str(weights)
+        if source.startswith(("http://", "https://")):
+            checkpoint = torch.hub.load_state_dict_from_url(
+                source, map_location="cpu", check_hash=False
+            )
+        else:
+            path = Path(os.path.expanduser(source))
+            if not path.is_file():
+                raise FileNotFoundError(f"matcher weights not found: {path}")
+            checkpoint = torch.load(str(path), map_location="cpu", weights_only=False)
+
+        if isinstance(checkpoint, dict):
+            state_dict = checkpoint.get(
+                "model",
+                checkpoint.get("state_dict", checkpoint.get("matcher", checkpoint)),
+            )
+        else:
+            state_dict = checkpoint
+
+        normalized = {}
+        for key, value in state_dict.items():
+            while key.startswith(("module.", "model.")):
+                key = key.split(".", 1)[1]
+            if key.startswith("extractor."):
+                continue
+            key = key.removeprefix("matcher.")
+            key = key.replace("transformers.", "transformermambas.")
+            key = key.replace(".mamba_self_attn.", ".mamba_selfattn_mixer.")
+            normalized[key] = value
+
+        report = self.load_state_dict(normalized, strict=False)
+        if report.missing_keys or report.unexpected_keys:
+            raise ValueError(
+                "matcher weights do not match the model: "
+                f"missing={sorted(report.missing_keys)} "
+                f"unexpected={sorted(report.unexpected_keys)}"
+            )
 
     def _forward(self, data: dict) -> dict:
         for key in self.required_data_keys:
@@ -232,12 +278,8 @@ class MambaGlueMatcher(BaseModel):
         if do_point_pruning:
             m0_ = torch.full((b, m), -1, device=m0.device, dtype=m0.dtype)
             m1_ = torch.full((b, n), -1, device=m1.device, dtype=m1.dtype)
-            m0_[:, ind0] = torch.where(
-                m0 == -1, -1, ind1.gather(1, m0.clamp(min=0))
-            )
-            m1_[:, ind1] = torch.where(
-                m1 == -1, -1, ind0.gather(1, m1.clamp(min=0))
-            )
+            m0_[:, ind0] = torch.where(m0 == -1, -1, ind1.gather(1, m0.clamp(min=0)))
+            m1_[:, ind1] = torch.where(m1 == -1, -1, ind0.gather(1, m1.clamp(min=0)))
             mscores0_ = torch.zeros((b, m), device=mscores0.device)
             mscores1_ = torch.zeros((b, n), device=mscores1.device)
             mscores0_[:, ind0] = mscores0

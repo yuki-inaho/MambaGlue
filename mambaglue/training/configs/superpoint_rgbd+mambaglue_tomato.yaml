@@ -1,0 +1,91 @@
+# MambaGlue RGB-D training on the vggt-omega ``colmap_rgbd`` staging contract.
+#
+# Self-contained (no hydra group defaults) so the file can live in this repo.
+# ``data.root`` is deliberately null: pass it at runtime, e.g.
+#   uv run --no-sync python -m mambaglue.training.train_rgbd mambaglue_rgbd \
+#     --conf mambaglue/training/configs/superpoint_rgbd+mambaglue_tomato.yaml \
+#     data.root=/abs/path/to/<staging-root>
+data:
+  name: mambaglue.training.datasets.tomato_rgbd
+  root: null
+  scene: scene_000000
+  train_split: 0
+  val_split: 1
+  test_split: 2
+  preprocessing:
+    resize: 640
+    side: long
+    antialias: false
+  num_workers: 4
+  batch_size: 1
+  train_batch_size: 1
+  val_batch_size: 1
+  test_batch_size: 1
+
+model:
+  name: two_view_pipeline
+  extractor:
+    name: mambaglue.training.extractor_rgbd
+    trainable: false
+    # 256 keypoints: the portable selective-scan backward is super-linear in the
+    # token count (512 -> ~20s/iter, 256 -> ~2s/iter on the RTX 5060 Ti).
+    max_num_keypoints: 256
+    force_num_keypoints: true
+    detection_threshold: 0.005
+    nms_radius: 4
+  matcher:
+    name: mambaglue.training.matcher
+    input_dim: 256
+    descriptor_dim: 256
+    n_layers: 9
+    num_heads: 4
+    flash: false
+    # torch.utils.checkpoint with use_reentrant=False raises CheckpointError
+    # ("recomputed values have different metadata") for the Mamba mixer on
+    # torch 2.12+cu130, so gradient checkpointing is disabled explicitly.
+    checkpointed: false
+    filter_threshold: 0.0
+    # Released MambaGlue v0.1 SuperPoint checkpoint (loaded via the strict
+    # prefix-normalizing loader in mambaglue/training/matcher.py).
+    weights: https://github.com/url-kaist/MambaGlue/releases/download/v0.1/superpoint_mambaglue.tar
+    loss:
+      gamma: 1.0
+      fn: nll
+      nll_balancing: 0.5
+      gamma_f: 0.0
+  ground_truth:
+    name: matchers.depth_matcher
+    th_positive: 3.0
+    th_negative: 5.0
+
+train:
+  seed: 42
+  epochs: 1
+  batch_size: 1
+  optimizer: amuse
+  optimizer_options:
+    muon_lr: 1.0e-4
+    aux_lr: 1.0e-5
+    warmup_steps: 20
+    beta1: 0.4
+    rho: 0.3
+    r: 0.0
+    weight_lr_power: 2.0
+    weight_decay: 0.01
+    momentum: 0.95
+  lr: 1.0e-4
+  lr_schedule:
+    type: null
+    start: 0
+    exp_div_10: 0
+    on_epoch: false
+    factor: 1.0
+    options: {}
+  log_every_iter: 5
+  eval_every_epoch: 1
+  save_every_iter: 100000
+  keep_last_checkpoints: 2
+  mixed_precision: bfloat16
+  clip_grad: 1.0
+  num_eval_plots: 0
+  writer: tensorboard
