@@ -35,6 +35,7 @@ classifiers = [
 ]
 dependencies = [
     "einops>=0.8,<1",
+    "gradio>=5.50.0",
     "kornia>=0.6.11,<1",
     "matplotlib>=3.8,<4",
     "numpy>=1.26,<3",
@@ -62,9 +63,11 @@ onnx = ["onnx>=1.16", "onnxruntime-gpu==1.22.0"]
 train = ["h5py", "tensorboard", "pytlsd"]
 
 [project.scripts]
+mambaglue-help = "mambaglue.help:main"
 mambaglue-smoke = "mambaglue.smoke:main"
 mambaglue-export-onnx = "mambaglue.onnx_export:main"
 mambaglue-demo = "mambaglue.gradio_app:main"
+mambaglue-camera = "mambaglue.camera_demo:main"
 
 [build-system]
 requires = ["setuptools>=68"]

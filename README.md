@@ -66,6 +66,9 @@ provided by this environment. Python 3.11 is selected automatically from
 uv sync
 ```
 
+Run `uv run mambaglue-help` to list every installed command (smoke test,
+Gradio demo, camera demo, ONNX export).
+
 `mamba-ssm` is optional: MambaGlue includes an equivalent PyTorch selective-scan
 fallback so `uv sync` does not require a system CUDA compiler. If an accelerated
 `mamba-ssm` build is installed later, it is detected automatically.
@@ -118,6 +121,50 @@ uv run mambaglue-demo
 
 Open the local URL printed by Gradio, upload two views of a scene, then choose
 the feature count, resize limit, and number of colored matches to display.
+
+### Live camera demo
+
+`mambaglue-camera` follows the ALIKED sequence-demo workflow: it matches every
+frame against the previous one with SuperPoint + MambaGlue and draws the motion
+lines in real time. The source can be a webcam (`camera0`), a video file, or a
+directory of images. Cameras are requested as MJPG 640x480@30 by default and a
+background thread keeps only the newest frame, so inference never falls behind
+a growing capture queue.
+
+```bash
+uv run mambaglue-camera camera0
+uv run mambaglue-camera camera0 --camera-width 1280 --camera-height 720
+uv run mambaglue-camera path/to/video.mp4
+uv run mambaglue-camera path/to/images --max-keypoints 1024 --resize 960
+```
+
+Press `space` to start matching and `q`/ESC to stop. On headless machines use
+`--no-display`, and add `--output out.mp4` to save the annotated frames.
+`--camera-fps`, `--camera-fourcc`, and `--camera-buffersize` tune the capture
+side; inspect the camera first with:
+
+```bash
+v4l2-ctl -d /dev/video0 --list-formats-ext   # MJPG usually allows 30 fps at all sizes
+v4l2-ctl -d /dev/video0 --get-parm           # currently negotiated frame rate
+```
+
+Two settings regularly cost half the frame rate: `exposure_dynamic_framerate=1`
+(the camera drops to 15 fps in low light to extend exposure; turn it off with
+`v4l2-ctl -d /dev/video0 -c exposure_dynamic_framerate=0`) and
+`--camera-buffersize 1` (the OpenCV V4L2 backend then delivers every other
+frame; keep it at 2 or more).
+
+Matching runs at roughly 15 fps on an RTX 2070 with the optional `mamba_ssm`
+CUDA kernel, and a few fps with the portable fallback. Prebuilt wheels for
+PyTorch 2.6 + CUDA 12 exist:
+
+```bash
+uv pip install "transformers<5" \
+  "https://github.com/state-spaces/mamba/releases/download/v2.2.4/mamba_ssm-2.2.4+cu12torch2.6cxx11abiFALSE-cp311-cp311-linux_x86_64.whl" \
+  "https://github.com/Dao-AILab/causal-conv1d/releases/download/v1.6.0/causal_conv1d-1.6.0+cu12torch2.6cxx11abiFALSE-cp311-cp311-linux_x86_64.whl"
+```
+
+`--scan-backend` selects `auto` (default), `mamba`, or `portable`.
 
 
 ## :zap: Quickstart
