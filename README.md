@@ -66,6 +66,9 @@ The project is managed with [uv](https://docs.astral.sh/uv/). On the
 uv sync
 ```
 
+The locked environment includes Glue Factory at a fixed Git commit for the
+bundled training adapter. Re-running `uv sync` preserves that dependency.
+
 `mamba-ssm` is optional: MambaGlue includes an equivalent PyTorch selective-scan
 fallback so `uv sync` does not require a system CUDA compiler. If an accelerated
 `mamba-ssm` build is installed later, it is detected automatically on supported
@@ -153,14 +156,11 @@ Supported front-end extractors: `superpoint`, `disk`, `aliked`, `sift` (passed v
 The `mambaglue/training/` subpackage adds a [Glue Factory](https://github.com/cvg/glue-factory) adapter (`MambaGlueMatcher`) and two YAML configs that reproduce the paper's two-stage recipe (synthetic homographies → MegaDepth) without modifying glue-factory itself.
 
 ```bash
-# 1) Install glue-factory (not on PyPI)
-pip install "git+https://github.com/cvg/glue-factory.git"
+# Install the additional training dependencies
+uv sync --extra train
 
-# 2) Install MambaGlue with training extras
-pip install -e ".[train]"
-
-# 3) Run both stages (SuperPoint + MambaGlue)
-bash mambaglue/training/run.sh
+# Run both stages (SuperPoint + MambaGlue)
+uv run --extra train bash mambaglue/training/run.sh
 ```
 
 The configs are 10-12 GB-tuned (batch 32 for homographies, batch 4 for MegaDepth, `bfloat16` autocast, gradient checkpointing). End-to-end training on a single RTX 3080 takes roughly a week. Target numbers from the paper (SuperPoint + MambaGlue):

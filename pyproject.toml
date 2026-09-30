@@ -35,6 +35,7 @@ classifiers = [
 ]
 dependencies = [
     "einops>=0.8,<1",
+    "gluefactory @ git+https://github.com/cvg/glue-factory.git@2d17e3b3bd7d30f0c828d4c4d3eac4ecefbf283d",
     "kornia>=0.6.11,<1",
     "matplotlib>=3.8,<4",
     "numpy>=1.26,<3",
@@ -58,9 +59,8 @@ Paper = "https://arxiv.org/abs/2502.00462"
 dev = ["black==23.12.1", "flake8", "isort"]
 demo = ["gradio>=5,<6"]
 onnx = ["onnx>=1.16", "onnxruntime-gpu==1.22.0"]
-# Training reproduction extras. `gluefactory` itself is not installable from
-# PyPI; install it separately (editable from a local clone or directly from
-# https://github.com/cvg/glue-factory). See mambaglue/training/README.md.
+# Training reproduction extras. Glue Factory is included in the base
+# dependencies because the bundled training adapter imports it.
 train = ["h5py", "tensorboard", "pytlsd"]
 
 [project.scripts]

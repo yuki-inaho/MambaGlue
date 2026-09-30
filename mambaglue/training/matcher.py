@@ -19,8 +19,8 @@ from pathlib import Path
 import torch
 import torch.utils.checkpoint
 from gluefactory.models.base_model import BaseModel
-from gluefactory.utils.losses import NLLLoss
-from gluefactory.utils.metrics import matcher_metrics
+from gluefactory.models.utils.losses import NLLLoss
+from gluefactory.models.utils.metrics import matcher_metrics
 from torch import nn
 
 from ..mambaglue import (

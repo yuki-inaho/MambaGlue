@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Two-stage MambaGlue + SuperPoint training via glue-factory.
-# Run from the MambaGlue repository root after `pip install -e ".[train]"` and
-# after installing glue-factory (see mambaglue/training/README.md).
+# Run from the MambaGlue repository root after `uv sync --extra train`.
 set -euo pipefail
 
 CONFIG_DIR="mambaglue/training/configs"
