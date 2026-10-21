@@ -64,3 +64,43 @@ def test_converted_graph_runs_against_independent_linear(mode):
         np.testing.assert_allclose(result, expected, rtol=1e-5, atol=1e-5)
     else:
         assert np.linalg.norm(result - expected) / np.linalg.norm(expected) < 0.02
+
+
+def test_equal_weight_bytes_with_different_shapes_are_not_shared():
+    import onnxruntime as ort
+    from onnx import TensorProto as T
+    from onnx import helper as h
+    from onnx import numpy_helper
+
+    inputs = [
+        h.make_tensor_value_info("X", T.FLOAT, [1, 16]),
+        h.make_tensor_value_info("Z", T.FLOAT, [1, 64]),
+    ]
+    outputs = [
+        h.make_tensor_value_info("Y", T.FLOAT, [1, 64]),
+        h.make_tensor_value_info("V", T.FLOAT, [1, 16]),
+    ]
+    graph = h.make_graph(
+        [
+            h.make_node("MatMul", ["X", "A"], ["Y"]),
+            h.make_node("MatMul", ["Z", "B"], ["V"]),
+        ],
+        "different_shapes",
+        inputs,
+        outputs,
+        [
+            numpy_helper.from_array(np.ones((16, 64), np.float32), "A"),
+            numpy_helper.from_array(np.ones((64, 16), np.float32), "B"),
+        ],
+    )
+    model = h.make_model(graph, opset_imports=[h.make_opsetid("", 18)])
+    model.ir_version = 10
+    result, _ = convert(model, group=16)
+    session = ort.InferenceSession(
+        result.SerializeToString(), providers=["CPUExecutionProvider"]
+    )
+    actual = session.run(
+        None, {"X": np.ones((1, 16), np.float32), "Z": np.ones((1, 64), np.float32)}
+    )
+    np.testing.assert_allclose(actual[0], np.full((1, 64), 16, np.float32), atol=1e-4)
+    np.testing.assert_allclose(actual[1], np.full((1, 16), 64, np.float32), atol=1e-4)

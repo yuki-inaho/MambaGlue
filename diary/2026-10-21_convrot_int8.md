@@ -37,4 +37,6 @@ ConvRot原論文のregular H4/Kroneckerによるgroup-wise直交回転を、cons
 
 機械可読な値は[summary.json](2026-10-21_convrot_int8/summary.json)。詳細の入力hash、45実測時間、全pair比較、profileと失敗履歴はローカル`temp/convrot_evidence/`。raw入力画像/特徴配列・大容量ONNX・profileをGit通常blobへ入れない。
 
-新規tool/testsの18テスト、Ruff check/formatを確認。serial cumsumの独立期待値・異常group・直交性・回転等価性・CPU整数推論・静的校正を含む。既存training repo全体のテスト成功や実機の収穫成功を主張しない。
+新規tool/testsの19テスト、Ruff check/formatを確認。serial cumsumの独立期待値・異常group・直交性・回転等価性・CPU整数推論・静的校正を含む。既存training repo全体のテスト成功や実機の収穫成功を主張しない。
+
+最終レビューで、同じweight bytesでも異なるmatrix shapeを持つ場合のcache衝突を発見。失敗する独立Linear例を追加してshapeをcache keyへ含めた。19テスト成功。今回の配布モデルは修正前後ともSHA fe47d06a…で一致し、既存性能測定を維持できる。

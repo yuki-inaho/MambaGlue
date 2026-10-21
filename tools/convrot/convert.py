@@ -180,7 +180,12 @@ def convert(
                     "Reshape", [rotated, shape], "rotated_activation"
                 )
             activation = rotation_cache[rotation_key]
-        key = (hashlib.sha256(weight.tobytes()).hexdigest(), actual_group, mode)
+        key = (
+            hashlib.sha256(weight.tobytes()).hexdigest(),
+            weight.shape,
+            actual_group,
+            mode,
+        )
         if key not in weight_cache:
             wr = rotate_weight(weight, actual_group) if actual_group else weight
             if mode == "none":
