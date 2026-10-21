@@ -1,0 +1,73 @@
+{
+  "schema": "mambaglue_convrot_delivery/1",
+  "baseline": {
+    "model_sha256": "b6cb29ca494d63940a6b7a545e995be10eb2650e74f4eda2047183349c8ce2e5",
+    "model_bytes": 64338815,
+    "warm_median_seconds": 5.358105361985508,
+    "warm_p95_seconds": 6.677070817002095,
+    "peak_bytes": 461373440,
+    "load_seconds": 2.0912104269955307
+  },
+  "fp32_scan_ablation": {
+    "model_sha256": "22d4f564f537de3ddee131ec724371cb20cf7c55a981e1250e7a33794d479ca5",
+    "model_bytes": 64334318,
+    "warm_median_seconds": 0.42802495503565297,
+    "peak_bytes": 463470592
+  },
+  "final": {
+    "model_sha256": "fe47d06a349d0e2095bc7f85d5e6c88c2e92036e95a3bfffd348509082a93c37",
+    "model_bytes": 18464313,
+    "warm_median_seconds": 0.4485565139912069,
+    "warm_p95_seconds": 0.6050666568102313,
+    "peak_bytes": 394264576,
+    "load_seconds": 5.26279228401836,
+    "evaluation_positive_retained": 333,
+    "evaluation_baseline_positive": 336,
+    "evaluation_retention": 0.9910714285714286
+  },
+  "speed_ratio": 11.945218037989621,
+  "memory_reduction_fraction": 0.1454545454545455,
+  "file_reduction_fraction": 0.7130144066221922,
+  "all_final_outputs_bit_equal_to_preceding_scan_candidate": [
+    {
+      "input": "pair_00.npz",
+      "bit_equal": true
+    },
+    {
+      "input": "pair_01.npz",
+      "bit_equal": true
+    },
+    {
+      "input": "pair_02.npz",
+      "bit_equal": true
+    },
+    {
+      "input": "pair_03.npz",
+      "bit_equal": true
+    },
+    {
+      "input": "pair_04.npz",
+      "bit_equal": true
+    },
+    {
+      "input": "pair_05.npz",
+      "bit_equal": true
+    },
+    {
+      "input": "pair_06.npz",
+      "bit_equal": true
+    },
+    {
+      "input": "pair_07.npz",
+      "bit_equal": true
+    },
+    {
+      "input": "pair_08.npz",
+      "bit_equal": true
+    }
+  ],
+  "onnx_external_data": false,
+  "source_branch": "origin/rgb-d 888be35520761e50f1943db04f088eee9c3ad6fc",
+  "artifact": "outputs/convrot/mambaglue_rgbd_convrot_int8_fast.onnx",
+  "scope": "10 frames /9 adjacent pairs /5 repeats /RTX2070 /matcher-only; baseline agreement not GT; output collection optimization supplies main speed gain"
+}

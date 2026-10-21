@@ -91,6 +91,16 @@ uv run mambaglue-smoke
 For a fast health check it limits SuperPoint to 256 keypoints and resizes each
 image to 320 pixels. Increase `--max-keypoints` for a heavier inference run.
 
+
+### RGB-D ConvRot INT8 ONNX experiment
+
+This RGB-D-based development branch adds standalone ONNX conversion and benchmarking under
+`tools/convrot/` (no Torch runtime required). See [the method and reproduction
+contract](docs/convrot_int8.md). `convert --mode int8 --group 256 --scan-outputs`
+combines signed INT8 regular-Hadamard Linear layers with an exact ONNX output
+collection optimization. FP32 and INT8 ablations are reported separately; no
+claim that quantization alone supplies the large latency reduction is made.
+
 ### Fixed-keypoint ONNX export
 
 Install the ONNX and GPU runtime extra, then export the released SuperPoint
